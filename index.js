@@ -74,6 +74,10 @@ if (DATABASE_URL) {
 // Routes
 // -------------------------------------------------------------------
 
+app.get("/", async (req, res) => {
+  res.json({ message: `Bienvenue sur ${APP_NAME} (version ${APP_VERSION})` });
+});
+
 // GET /health
 app.get("/health", async (req, res) => {
   const health = { status: "ok", name: APP_NAME, version: APP_VERSION };
