@@ -1,0 +1,15 @@
+{
+  "name": "example-app-nodejs",
+  "version": "1.0.0",
+  "description": "Application fournie pour le TP PaaS Clever Cloud",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.0",
+    "pg": "^8.11.0",
+    "dotenv": "^16.4.0"
+  }
+}

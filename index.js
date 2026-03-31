@@ -1,0 +1,131 @@
+require("dotenv").config();
+
+const express = require("express");
+
+const app = express();
+app.use(express.json());
+
+const PORT = process.env.PORT || 3000;
+const APP_VERSION = process.env.APP_VERSION || "1.0.0";
+const APP_NAME = process.env.APP_NAME || "my-app";
+const DATABASE_URL = process.env.POSTGRESQL_ADDON_URI;
+
+// -------------------------------------------------------------------
+// Storage — PostgreSQL si POSTGRESQL_ADDON_URI est défini, mémoire sinon
+// -------------------------------------------------------------------
+
+let storage;
+
+if (DATABASE_URL) {
+  const { Pool } = require("pg");
+  const pool = new Pool({ connectionString: DATABASE_URL });
+
+  storage = {
+    async init() {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS items (
+          id          SERIAL PRIMARY KEY,
+          name        TEXT NOT NULL,
+          description TEXT,
+          created_at  TIMESTAMPTZ DEFAULT NOW()
+        )
+      `);
+    },
+    async healthCheck() {
+      await pool.query("SELECT 1");
+      return "connected";
+    },
+    async findAll() {
+      const result = await pool.query("SELECT * FROM items ORDER BY created_at DESC");
+      return result.rows;
+    },
+    async insert(name, description) {
+      const result = await pool.query(
+        "INSERT INTO items (name, description) VALUES ($1, $2) RETURNING *",
+        [name, description ?? null]
+      );
+      return result.rows[0];
+    },
+  };
+} else {
+  console.warn("POSTGRESQL_ADDON_URI non défini — stockage en mémoire (données perdues au redémarrage)");
+
+  const items = [];
+  let nextId = 1;
+
+  storage = {
+    async init() {},
+    async healthCheck() { return "not configured"; },
+    async findAll() { return [...items].reverse(); },
+    async insert(name, description) {
+      const item = {
+        id: nextId++,
+        name,
+        description: description ?? null,
+        created_at: new Date().toISOString(),
+      };
+      items.push(item);
+      return item;
+    },
+  };
+}
+
+// -------------------------------------------------------------------
+// Routes
+// -------------------------------------------------------------------
+
+// GET /health
+app.get("/health", async (req, res) => {
+  const health = { status: "ok", name: APP_NAME, version: APP_VERSION };
+
+  if (DATABASE_URL) {
+    try {
+      await storage.healthCheck();
+      health.database = "connected";
+    } catch {
+      return res.status(503).json({ status: "error", version: APP_VERSION, database: "unreachable" });
+    }
+  }
+
+  res.json(health);
+});
+
+// GET /items
+app.get("/items", async (req, res) => {
+  const items = await storage.findAll();
+  res.json(items);
+});
+
+// POST /items
+app.post("/items", async (req, res) => {
+  const { name, description } = req.body;
+
+  if (!name || name.trim() === "") {
+    return res.status(400).json({ error: "Le champ 'name' est obligatoire" });
+  }
+
+  const item = await storage.insert(name.trim(), description);
+  res.status(201).json(item);
+});
+
+// GET /crash  — provoque un arrêt brutal du processus (démo PaaS)
+app.get("/crash", (req, res) => {
+  res.json({ message: "Crash imminent..." });
+  setTimeout(() => process.exit(1), 100);
+});
+
+// -------------------------------------------------------------------
+// Démarrage
+// -------------------------------------------------------------------
+
+storage.init()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`App démarrée sur le port ${PORT} (version ${APP_VERSION})`);
+      console.log(`Base de données : ${DATABASE_URL ? "PostgreSQL" : "mémoire"}`);
+    });
+  })
+  .catch((err) => {
+    console.error("Erreur d'initialisation :", err.message);
+    process.exit(1);
+  });
